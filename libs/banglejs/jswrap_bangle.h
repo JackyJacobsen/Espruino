@@ -27,6 +27,8 @@ void jswrap_banglejs_setLocked(bool isLocked);
 int jswrap_banglejs_isLocked();
 
 void jswrap_banglejs_setPollInterval(JsVarFloat interval);
+void jswrap_banglejs_startAccelPolling();
+void jswrap_banglejs_stopAccelPolling();
 void jswrap_banglejs_setOptions(JsVar *options);
 JsVar *jswrap_banglejs_getOptions();
 int jswrap_banglejs_isCharging();
@@ -48,6 +50,10 @@ void jswrap_banglejs_setStepCount(JsVarInt count);
 
 JsVar *jswrap_banglejs_getCompass();
 JsVar *jswrap_banglejs_getAccel();
+JsVar *jswrap_banglejs_readAccel();
+void jswrap_banglejs_initStreamAccel(JsVar *serial);
+void jswrap_banglejs_streamAccel();
+void jswrap_banglejs_streamAccelBatch();
 JsVar *jswrap_banglejs_getPressure();
 JsVar *jswrap_banglejs_getHealthStatus();
 

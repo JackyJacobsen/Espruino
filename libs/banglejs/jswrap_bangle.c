@@ -15,6 +15,7 @@
  */
 
 #include <jswrap_bangle.h>
+#include <stdio.h>
 #include "jsinteractive.h"
 #include "jsdevices.h"
 #include "jsnative.h"
@@ -30,6 +31,7 @@
 #include "jswrap_arraybuffer.h"
 #include "jswrap_heatshrink.h"
 #include "jswrap_espruino.h"
+#include "jswrap_serial.h"
 #include "jswrap_terminal.h"
 #include "jsflash.h"
 #include "graphics.h"
@@ -58,7 +60,7 @@
 #include "lcd_spilcd.h"
 #endif
 
-#ifdef ACCEL_DEVICE_KX126 
+#ifdef ACCEL_DEVICE_KX126
 #include "kx126_registers.h"
 #endif
 
@@ -794,6 +796,9 @@ bool lcdFadeHandlerActive;
 // compass data
 Vector3 mag, magmin, magmax;
 #endif
+
+bool enableAccel = true;
+
 /// accelerometer data
 Vector3 acc;
 /// squared accelerometer magnitude
@@ -1116,9 +1121,9 @@ void peripheralPollHandler() {
   // Handle watchdog
   if (!(jshPinGetValue(BTN1_PININDEX)
 #ifdef BTN2_PININDEX
-       && jshPinGetValue(BTN2_PININDEX)
+        && jshPinGetValue(BTN2_PININDEX)
 #endif
-       ))
+            ))
     jshKickWatchDog();
 
   // power on display if a button is pressed
@@ -1160,22 +1165,24 @@ void peripheralPollHandler() {
     lcdMemLCD_extcominToggle();
 #endif
 
-  if (lcdPowerTimeout && (bangleFlags&JSBF_LCD_ON) && inactivityTimer>=lcdPowerTimeout) {
+  if (lcdPowerTimeout && (bangleFlags & JSBF_LCD_ON) &&
+      inactivityTimer >= lcdPowerTimeout) {
     // 10 seconds of inactivity, turn off display
     bangleTasks |= JSBT_LCD_OFF;
     jshHadEvent();
   }
-  if (backlightTimeout && (bangleFlags&JSBF_LCD_BL_ON) && inactivityTimer>=backlightTimeout) {
+  if (backlightTimeout && (bangleFlags & JSBF_LCD_BL_ON) &&
+      inactivityTimer >= backlightTimeout) {
     // 10 seconds of inactivity, turn off display
     bangleTasks |= JSBT_LCD_BL_OFF;
     jshHadEvent();
   }
-  if (lockTimeout && !(bangleFlags&JSBF_LOCKED) && inactivityTimer>=lockTimeout) {
+  if (lockTimeout && !(bangleFlags & JSBF_LOCKED) &&
+      inactivityTimer >= lockTimeout) {
     // 10 seconds of inactivity, lock display
     bangleTasks |= JSBT_LOCK;
     jshHadEvent();
   }
-
 
   // check charge status
   bool isCharging = jswrap_banglejs_isCharging();
@@ -1184,266 +1191,285 @@ void peripheralPollHandler() {
     bangleTasks |= JSBT_CHARGE_EVENT;
     jshHadEvent();
   }
-  if (i2cBusy) return;
+  if (i2cBusy)
+    return;
   i2cBusy = true;
   unsigned char buf[7];
   // check the magnetometer if we had it on
   if (bangleFlags & JSBF_COMPASS_ON) {
     bool newReading = false;
 #ifdef MAG_DEVICE_GMC303
-    buf[0]=0x10;
+    buf[0] = 0x10;
     jsi2cWrite(MAG_I2C, MAG_ADDR, 1, buf, false);
     jsi2cRead(MAG_I2C, MAG_ADDR, 7, buf, true);
-    if (buf[0]&1) { // then we have data
-      mag.y = buf[1] | (buf[2]<<8);
-      mag.x = buf[3] | (buf[4]<<8);
-      mag.z = buf[5] | (buf[6]<<8);
+    if (buf[0] & 1) { // then we have data
+      mag.y = buf[1] | (buf[2] << 8);
+      mag.x = buf[3] | (buf[4] << 8);
+      mag.z = buf[5] | (buf[6] << 8);
       newReading = true;
     }
 #endif
 #ifdef MAG_DEVICE_UNKNOWN_0C
-    buf[0]=0x4E;
+    buf[0] = 0x4E;
     jsi2cWrite(MAG_I2C, MAG_ADDR, 1, buf, false);
     jsi2cRead(MAG_I2C, MAG_ADDR, 7, buf, true);
-    if (!(buf[0]&16)) { // then we have data that wasn't read before
+    if (!(buf[0] & 16)) { // then we have data that wasn't read before
       // &2 seems always set
       // &16 seems set if we read twice
       // &32 might be reading in progress
-      mag.y = buf[2] | (buf[1]<<8);
-      mag.x = buf[4] | (buf[3]<<8);
-      mag.z = buf[6] | (buf[5]<<8);
+      mag.y = buf[2] | (buf[1] << 8);
+      mag.x = buf[4] | (buf[3] << 8);
+      mag.z = buf[6] | (buf[5] << 8);
       // Now read 0x3E which should kick off a new reading
-      buf[0]=0x3E;
+      buf[0] = 0x3E;
       jsi2cWrite(MAG_I2C, MAG_ADDR, 1, buf, false);
       jsi2cRead(MAG_I2C, MAG_ADDR, 1, buf, true);
       newReading = true;
     }
 #endif
     if (newReading) {
-      if (mag.x<magmin.x) magmin.x=mag.x;
-      if (mag.y<magmin.y) magmin.y=mag.y;
-      if (mag.z<magmin.z) magmin.z=mag.z;
-      if (mag.x>magmax.x) magmax.x=mag.x;
-      if (mag.y>magmax.y) magmax.y=mag.y;
-      if (mag.z>magmax.z) magmax.z=mag.z;
+      if (mag.x < magmin.x)
+        magmin.x = mag.x;
+      if (mag.y < magmin.y)
+        magmin.y = mag.y;
+      if (mag.z < magmin.z)
+        magmin.z = mag.z;
+      if (mag.x > magmax.x)
+        magmax.x = mag.x;
+      if (mag.y > magmax.y)
+        magmax.y = mag.y;
+      if (mag.z > magmax.z)
+        magmax.z = mag.z;
       bangleTasks |= JSBT_MAG_DATA;
       jshHadEvent();
     }
   }
 #ifdef ACCEL_I2C
+  if (enableAccel) {
 #ifdef ACCEL_DEVICE_KX023
-  // poll KX023 accelerometer (no other way as IRQ line seems disconnected!)
-  // read interrupt source data
-  buf[0]=0x12; // INS1
-  jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
-  jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 2, buf, true);
-  // 0 -> 0x12 INS1 - tap event
-  // 1 -> 0x13 INS2 - what kind of event
-  bool hasAccelData = (buf[1]&16)!=0; // DRDY
-  int tapType = (buf[1]>>2)&3; // TDTS0/1
-  if (tapType) {
-    tapInfo = buf[0] | (tapType<<6);
-  }
-  if (tapType) {
-    bool handled = false;
-    // wake on tap, for front (for Bangle.js 2)
-#ifdef BANGLEJS_Q3
-    if ((bangleFlags&JSBF_WAKEON_TOUCH) && (tapInfo&2)) {
-      if (!(bangleFlags&JSBF_LCD_ON)) {
-        bangleTasks |= JSBT_LCD_ON;
-        handled = true;
-      }
-      if (!(bangleFlags&JSBF_LCD_BL_ON)) {
-        bangleTasks |= JSBT_LCD_BL_ON;
-        handled = true;
-      }
-      if (bangleFlags&JSBF_LOCKED) {
-        bangleTasks |= JSBT_UNLOCK;
-        handled = true;
-      }
-    }
-#endif
-    // report tap
-    if (!handled)
-      bangleTasks |= JSBT_ACCEL_TAPPED;
-    jshHadEvent();
-    // clear the IRQ flags
-    buf[0]=0x17;
+    // poll KX023 accelerometer (no other way as IRQ line seems disconnected!)
+    // read interrupt source data
+    buf[0] = 0x12; // INS1
     jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
-    jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 1, buf, true);
-  }
+    jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 2, buf, true);
+    // 0 -> 0x12 INS1 - tap event
+    // 1 -> 0x13 INS2 - what kind of event
+    bool hasAccelData = (buf[1] & 16) != 0; // DRDY
+    int tapType = (buf[1] >> 2) & 3;        // TDTS0/1
+    if (tapType) {
+      tapInfo = buf[0] | (tapType << 6);
+    }
+    if (tapType) {
+      bool handled = false;
+      // wake on tap, for front (for Bangle.js 2)
+#ifdef BANGLEJS_Q3
+      if ((bangleFlags & JSBF_WAKEON_TOUCH) && (tapInfo & 2)) {
+        if (!(bangleFlags & JSBF_LCD_ON)) {
+          bangleTasks |= JSBT_LCD_ON;
+          handled = true;
+        }
+        if (!(bangleFlags & JSBF_LCD_BL_ON)) {
+          bangleTasks |= JSBT_LCD_BL_ON;
+          handled = true;
+        }
+        if (bangleFlags & JSBF_LOCKED) {
+          bangleTasks |= JSBT_UNLOCK;
+          handled = true;
+        }
+      }
+#endif
+      // report tap
+      if (!handled)
+        bangleTasks |= JSBT_ACCEL_TAPPED;
+      jshHadEvent();
+      // clear the IRQ flags
+      buf[0] = 0x17;
+      jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
+      jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 1, buf, true);
+    }
 #endif
 #ifdef ACCEL_DEVICE_KXTJ3_1057
-  // read interrupt source data
-  buf[0]=0x16; // INT_SOURCE1
-  jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
-  jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 1, buf, true);
-  bool hasAccelData = (buf[0]&16)!=0; // DRDY
-#endif
-#ifdef ACCEL_DEVICE_KX126
-  // read interrupt source data (INS1 and INS2 registers)
-  buf[0]=KX126_INS1; 
-  jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
-  jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 2, buf, true);
-  // 0 -> INS1 - step counter & tap events
-  // 1 -> INS2 - what kind of event
-  bool hasAccelData = (buf[1] & KX126_INS2_DRDY)!=0; // Is new data ready?
-  int tapType = (buf[1]>>2)&3; // TDTS0/1
-  if (tapType) {
-    // report tap
-    tapInfo = buf[0] | (tapType<<6);
-    bangleTasks |= JSBT_ACCEL_TAPPED;
-    jshHadEvent();
-  }
-  // clear the IRQ flags
-  buf[0]=KX126_INT_REL;
-  jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
-  jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 1, buf, true);
-#endif
-  if (hasAccelData) {
-#ifdef ACCEL_DEVICE_KX126
-    buf[0]=KX126_XOUT_L;
+    // read interrupt source data
+    buf[0] = 0x16; // INT_SOURCE1
     jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
+    jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 1, buf, true);
+    bool hasAccelData = (buf[0] & 16) != 0; // DRDY
+#endif
+#ifdef ACCEL_DEVICE_KX126
+    // read interrupt source data (INS1 and INS2 registers)
+    buf[0] = KX126_INS1;
+    jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
+    jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 2, buf, true);
+    // 0 -> INS1 - step counter & tap events
+    // 1 -> INS2 - what kind of event
+    bool hasAccelData = (buf[1] & KX126_INS2_DRDY) != 0; // Is new data ready?
+    int tapType = (buf[1] >> 2) & 3;                     // TDTS0/1
+    if (tapType) {
+      // report tap
+      tapInfo = buf[0] | (tapType << 6);
+      bangleTasks |= JSBT_ACCEL_TAPPED;
+      jshHadEvent();
+    }
+    // clear the IRQ flags
+    buf[0] = KX126_INT_REL;
+    jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
+    jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 1, buf, true);
+#endif
+    if (hasAccelData) {
+#ifdef ACCEL_DEVICE_KX126
+      buf[0] = KX126_XOUT_L;
+      jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
 #else
-    buf[0]=6;
-    jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
+      buf[0] = 6;
+      jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
 #endif
-    jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 6, buf, true);
-    // work out current reading in 16 bit
-    short newx = (buf[1]<<8)|buf[0];
-    short newy = (buf[3]<<8)|buf[2];
-    short newz = (buf[5]<<8)|buf[4];
+      jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 6, buf, true);
+      // work out current reading in 16 bit
+      short newx = (buf[1] << 8) | buf[0];
+      short newy = (buf[3] << 8) | buf[2];
+      short newz = (buf[5] << 8) | buf[4];
 #ifdef BANGLEJS_Q3
-    newx = -newx; //consistent directions with Bangle
-    newz = -newz; 
+      newx = -newx; // consistent directions with Bangle
+      newz = -newz;
 #endif
 #ifdef ACCEL_DEVICE_KX126
-    newy = -newy;
+      newy = -newy;
 #endif
-    int dx = newx-acc.x;
-    int dy = newy-acc.y;
-    int dz = newz-acc.z;
-    acc.x = newx;
-    acc.y = newy;
-    acc.z = newz;
-    accMagSquared = acc.x*acc.x + acc.y*acc.y + acc.z*acc.z;
-    accDiff = int_sqrt32(dx*dx + dy*dy + dz*dz);
-    // save history
-    accHistoryIdx = (accHistoryIdx+3) % sizeof(accHistory);
-    accHistory[accHistoryIdx  ] = clipi8(newx>>7);
-    accHistory[accHistoryIdx+1] = clipi8(newy>>7);
-    accHistory[accHistoryIdx+2] = clipi8(newz>>7);
-    // Power saving
-    if (bangleFlags & JSBF_POWER_SAVE) {
-      if (accDiff > POWER_SAVE_MIN_ACCEL) {
-        powerSaveTimer = 0;
-        if (pollInterval == POWER_SAVE_ACCEL_POLL_INTERVAL) {
-          bangleTasks |= JSBT_ACCEL_INTERVAL_DEFAULT;
-          jshHadEvent();
-        }
-      } else {
-        if (powerSaveTimer < TIMER_MAX)
-          powerSaveTimer += pollInterval;
-        if (powerSaveTimer >= POWER_SAVE_TIMEOUT && // stationary for POWER_SAVE_TIMEOUT
-            pollInterval == DEFAULT_ACCEL_POLL_INTERVAL && // we are in high power mode
-            !(bangleFlags & JSBF_ACCEL_LISTENER) && // nothing was listening to accelerometer data
-#ifdef PRESSURE_DEVICE
-            !(bangleFlags & JSBF_BAROMETER_ON) && // barometer isn't on (streaming uses peripheralPollHandler)
-#endif
-#ifdef MAG_I2C
-            !(bangleFlags & JSBF_COMPASS_ON) && // compass isn't on (streaming uses peripheralPollHandler)
-#endif
-            true) {
-          bangleTasks |= JSBT_ACCEL_INTERVAL_POWERSAVE;
-          jshHadEvent();
-        }
-      }
-    }
-    // trigger accelerometer data task if needed
-    if (bangleFlags & JSBF_ACCEL_LISTENER) {
-      bangleTasks |= JSBT_ACCEL_DATA;
-      jshHadEvent();
-    }
-    // check for 'face up'
-    faceUp = (acc.z<-6700) && (acc.z>-9000) && abs(acc.x)<2048 && abs(acc.y)<2048;
-    if (faceUp!=wasFaceUp) {
-      faceUpTimer = 0;
-      faceUpSent = false;
-      wasFaceUp = faceUp;
-    }
-    if (faceUpTimer<TIMER_MAX) faceUpTimer += pollInterval;
-    if (faceUpTimer>=300 && !faceUpSent) {
-      faceUpSent = true;
-      bangleTasks |= JSBT_FACE_UP;
-      jshHadEvent();
-    }
-    // Step counter
-    if (bangleTasks & JSBT_ACCEL_INTERVAL_DEFAULT) {
-      // we've come out of powersave, reset the algorithm
-      stepcount_init();
-    }
-    if (powerSaveTimer < POWER_SAVE_TIMEOUT) {
-      // only do step counting if power save is off (otherwise accel interval is too low - also wastes power)
-      int newSteps = stepcount_new(accMagSquared);
-      if (newSteps>0) {
-        stepCounter += newSteps;
-        healthCurrent.stepCount += newSteps;
-        healthDaily.stepCount += newSteps;
-        bangleTasks |= JSBT_STEP_EVENT;
-        jshHadEvent();
-      }
-    }
-    // check for twist action
-    if (twistTimer < TIMER_MAX)
-      twistTimer += pollInterval;
-    int tdy = dy;
-    int tthresh = twistThreshold;
-    if (tthresh<0) {
-      tthresh = -tthresh;
-      tdy = -tdy;
-    }
-    if (tdy>tthresh) twistTimer=0;
-    if (tdy<-tthresh && twistTimer<twistTimeout && acc.y<twistMaxY) {
-      twistTimer = TIMER_MAX; // ensure we don't trigger again until tdy>tthresh
-      bangleTasks |= JSBT_TWIST_EVENT;
-      jshHadEvent();
-      if (bangleFlags&JSBF_WAKEON_TWIST) {
-        inactivityTimer = 0;
-        if (!(bangleFlags&JSBF_LCD_ON))
-          bangleTasks |= JSBT_LCD_ON;
-        if (!(bangleFlags&JSBF_LCD_BL_ON))
-          bangleTasks |= JSBT_LCD_BL_ON;
-        if (bangleFlags&JSBF_LOCKED)
-          bangleTasks |= JSBT_UNLOCK;
-      }
-    }
+      int dx = newx - acc.x;
+      int dy = newy - acc.y;
+      int dz = newz - acc.z;
+      acc.x = newx;
+      acc.y = newy;
+      acc.z = newz;
+      accMagSquared = acc.x * acc.x + acc.y * acc.y + acc.z * acc.z;
+      accDiff = int_sqrt32(dx * dx + dy * dy + dz * dz);
+      // save history
+      accHistoryIdx = (accHistoryIdx + 3) % sizeof(accHistory);
+      accHistory[accHistoryIdx] = clipi8(newx >> 7);
+      accHistory[accHistoryIdx + 1] = clipi8(newy >> 7);
+      accHistory[accHistoryIdx + 2] = clipi8(newz >> 7);
 
-    // checking for gestures
-    if (accGestureCount==0) { // no gesture yet
-      // if movement is eniugh, start one
-      if (accDiff > accelGestureStartThresh) {
-        accIdleCount = 0;
-        accGestureCount = 1;
-      }
-    } else { // we're recording a gesture
-      // keep incrementing gesture size
-      if (accGestureCount < 255)
-        accGestureCount++;
-      // if idle for long enough...
-      if (accDiff < accelGestureEndThresh) {
-        if (accIdleCount<255) accIdleCount++;
-        if (accIdleCount==accelGestureInactiveCount) {
-          // inactive for long enough for a gesture, but not too long
-          accGestureRecordedCount = accGestureCount;
-          if ((accGestureCount >= accelGestureMinLength) &&
-              (accGestureCount < ACCEL_HISTORY_LEN)) {
-            bangleTasks |= JSBT_GESTURE_DATA; // trigger a gesture task
+      // Power saving
+      if (bangleFlags & JSBF_POWER_SAVE) {
+        if (accDiff > POWER_SAVE_MIN_ACCEL) {
+          powerSaveTimer = 0;
+          if (pollInterval == POWER_SAVE_ACCEL_POLL_INTERVAL) {
+            bangleTasks |= JSBT_ACCEL_INTERVAL_DEFAULT;
             jshHadEvent();
           }
-          accGestureCount = 0; // stop the gesture
+        } else {
+          if (powerSaveTimer < TIMER_MAX)
+            powerSaveTimer += pollInterval;
+          if (powerSaveTimer >=
+                  POWER_SAVE_TIMEOUT && // stationary for POWER_SAVE_TIMEOUT
+              pollInterval ==
+                  DEFAULT_ACCEL_POLL_INTERVAL && // we are in high power mode
+              !(bangleFlags & JSBF_ACCEL_LISTENER) && // nothing was listening to accelerometer data
+#ifdef PRESSURE_DEVICE
+              !(bangleFlags &
+                JSBF_BAROMETER_ON) && // barometer isn't on (streaming uses peripheralPollHandler)
+#endif
+#ifdef MAG_I2C
+              !(bangleFlags & JSBF_COMPASS_ON) && // compass isn't on (streaming uses peripheralPollHandler)
+#endif
+              true) {
+            bangleTasks |= JSBT_ACCEL_INTERVAL_POWERSAVE;
+            jshHadEvent();
+          }
         }
-      } else if (accIdleCount < accelGestureInactiveCount)
-        accIdleCount = 0; // it was inactive but not long enough to trigger a gesture
+      }
+      // trigger accelerometer data task if needed
+      if (bangleFlags & JSBF_ACCEL_LISTENER) {
+        bangleTasks |= JSBT_ACCEL_DATA;
+        jshHadEvent();
+      }
+      // check for 'face up'
+      faceUp = (acc.z < -6700) && (acc.z > -9000) && abs(acc.x) < 2048 &&
+               abs(acc.y) < 2048;
+      if (faceUp != wasFaceUp) {
+        faceUpTimer = 0;
+        faceUpSent = false;
+        wasFaceUp = faceUp;
+      }
+      if (faceUpTimer < TIMER_MAX)
+        faceUpTimer += pollInterval;
+      if (faceUpTimer >= 300 && !faceUpSent) {
+        faceUpSent = true;
+        bangleTasks |= JSBT_FACE_UP;
+        jshHadEvent();
+      }
+      // Step counter
+      if (bangleTasks & JSBT_ACCEL_INTERVAL_DEFAULT) {
+        // we've come out of powersave, reset the algorithm
+        stepcount_init();
+      }
+      if (powerSaveTimer < POWER_SAVE_TIMEOUT) {
+        // only do step counting if power save is off (otherwise accel interval is too low - also wastes power)
+        int newSteps = stepcount_new(accMagSquared);
+        if (newSteps > 0) {
+          stepCounter += newSteps;
+          healthCurrent.stepCount += newSteps;
+          healthDaily.stepCount += newSteps;
+          bangleTasks |= JSBT_STEP_EVENT;
+          jshHadEvent();
+        }
+      }
+      // check for twist action
+      if (twistTimer < TIMER_MAX)
+        twistTimer += pollInterval;
+      int tdy = dy;
+      int tthresh = twistThreshold;
+      if (tthresh < 0) {
+        tthresh = -tthresh;
+        tdy = -tdy;
+      }
+      if (tdy > tthresh)
+        twistTimer = 0;
+      if (tdy < -tthresh && twistTimer < twistTimeout && acc.y < twistMaxY) {
+        twistTimer =
+            TIMER_MAX; // ensure we don't trigger again until tdy>tthresh
+        bangleTasks |= JSBT_TWIST_EVENT;
+        jshHadEvent();
+        if (bangleFlags & JSBF_WAKEON_TWIST) {
+          inactivityTimer = 0;
+          if (!(bangleFlags & JSBF_LCD_ON))
+            bangleTasks |= JSBT_LCD_ON;
+          if (!(bangleFlags & JSBF_LCD_BL_ON))
+            bangleTasks |= JSBT_LCD_BL_ON;
+          if (bangleFlags & JSBF_LOCKED)
+            bangleTasks |= JSBT_UNLOCK;
+        }
+      }
+
+      // checking for gestures
+      if (accGestureCount == 0) { // no gesture yet
+        // if movement is eniugh, start one
+        if (accDiff > accelGestureStartThresh) {
+          accIdleCount = 0;
+          accGestureCount = 1;
+        }
+      } else { // we're recording a gesture
+        // keep incrementing gesture size
+        if (accGestureCount < 255)
+          accGestureCount++;
+        // if idle for long enough...
+        if (accDiff < accelGestureEndThresh) {
+          if (accIdleCount < 255)
+            accIdleCount++;
+          if (accIdleCount == accelGestureInactiveCount) {
+            // inactive for long enough for a gesture, but not too long
+            accGestureRecordedCount = accGestureCount;
+            if ((accGestureCount >= accelGestureMinLength) &&
+                (accGestureCount < ACCEL_HISTORY_LEN)) {
+              bangleTasks |= JSBT_GESTURE_DATA; // trigger a gesture task
+              jshHadEvent();
+            }
+            accGestureCount = 0; // stop the gesture
+          }
+        } else if (accIdleCount < accelGestureInactiveCount)
+          accIdleCount =
+              0; // it was inactive but not long enough to trigger a gesture
+      }
     }
   }
 
@@ -1732,7 +1758,7 @@ void touchHandlerInternal(int tx, int ty, int pts, int gesture) {
       break;
     case 0x0C:     // long touch
       if (touchX<80) bangleTasks |= JSBT_TOUCH_LEFT;
-      else bangleTasks |= JSBT_TOUCH_RIGHT;        
+      else bangleTasks |= JSBT_TOUCH_RIGHT;
       touchType = 2;
       break;
     }
@@ -2258,6 +2284,34 @@ void jswrap_banglejs_setPollInterval(JsVarFloat interval) {
   }
   bangleFlags &= ~JSBF_POWER_SAVE; // turn off power save since it'll just overwrite the poll interval
   jswrap_banglejs_setPollInterval_internal((uint16_t)interval);
+}
+
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "startAccelPolling",
+    "generate" : "jswrap_banglejs_startAccelPolling",
+    "ifdef" : "BANGLEJS"
+}
+Enables reading accel data in the poll handler.
+*/
+void jswrap_banglejs_startAccelPolling() {
+  enableAccel = true;
+}
+
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "stopAccelPolling",
+    "generate" : "jswrap_banglejs_stopAccelPolling",
+    "ifdef" : "BANGLEJS"
+}
+Stops reading accel data in the poll handler.
+
+Call `Bangle.startAccelPolling()` to enable it again.
+*/
+void jswrap_banglejs_stopAccelPolling() {
+  enableAccel = false;
 }
 
 /*TYPESCRIPT
@@ -3083,6 +3137,174 @@ JsVar *jswrap_banglejs_getAccel() {
 /*JSON{
     "type" : "staticmethod",
     "class" : "Bangle",
+    "name" : "readAccel",
+    "generate" : "jswrap_banglejs_readAccel",
+    "return" : ["JsVar","An object containing accelerometer readings (as below)"],
+    "ifdef" : "BANGLEJS",
+    "typescript" : "readAccel(): AccelData & { td: number };"
+}
+Get the most recent accelerometer reading. Data is in the same format as the
+`Bangle.on('accel',` event.
+
+* `x` is X axis (left-right) in `g`
+* `y` is Y axis (up-down) in `g`
+* `z` is Z axis (in-out) in `g`
+* `diff` is difference between this and the last reading in `g` (calculated by
+  comparing vectors, not magnitudes)
+* `td` is the elapsed
+* `mag` is the magnitude of the acceleration in `g`
+*/
+JsVar *jswrap_banglejs_readAccel() {
+  JsVar *o = jsvNewObject();
+#ifdef ACCEL_I2C
+  if (o) {
+    unsigned char buf[7];
+    buf[0]=6;
+    jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
+    jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 6, buf, true);
+    // work out current reading in 16 bit
+    short x = (buf[1]<<8)|buf[0];
+    short y = (buf[3]<<8)|buf[2];
+    short z = (buf[5]<<8)|buf[4];
+    jsvObjectSetChildAndUnLock(o, "x", jsvNewFromFloat(x/8192.0));
+    jsvObjectSetChildAndUnLock(o, "y", jsvNewFromFloat(y/8192.0));
+    jsvObjectSetChildAndUnLock(o, "z", jsvNewFromFloat(z/8192.0));
+    jsvObjectSetChildAndUnLock(o, "mag", 0);
+    jsvObjectSetChildAndUnLock(o, "diff", 0);
+  }
+#endif
+  return o;
+}
+
+void ftos(char *str, float f/*, int len*/) {
+//  char *p = str + len;
+  char sign = (f < 0) ? '-' : ' ';
+  float tmp = (f < 0) ? -f : f;
+
+  int decimals = (int) tmp;
+  int units = (int) ((tmp) * 1000000);
+
+  sprintf(str, "%c%d.%06d", sign, decimals, units);
+
+//  while (units > decimals) {
+//    *p-- = (units % 10) + '0';
+//    units /= 10;
+//  }
+//  *p-- = '.';
+//  do {
+//    *p-- = (decimals % 10) + '0';
+//    decimals /= 10;
+//  } while (decimals > 0);
+//  *p = sign;
+}
+
+JsVar *streamAccelSerial;
+
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "initStreamAccel",
+    "generate" : "jswrap_banglejs_initStreamAccel",
+    "params" : [
+      ["serial","JsVar","serial object"]
+    ],
+    "ifdef" : "BANGLEJS"
+}
+*/
+void jswrap_banglejs_initStreamAccel(JsVar *serial) {
+  streamAccelSerial = serial;
+}
+
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "streamAccel",
+    "generate" : "jswrap_banglejs_streamAccel",
+    "ifdef" : "BANGLEJS"
+}
+*/
+void jswrap_banglejs_streamAccel() {
+  unsigned char buf[7];
+  buf[0] = 6;
+  jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
+  jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 6, buf, true);
+  short x = (buf[1]<<8)|buf[0];
+  short y = (buf[3]<<8)|buf[2];
+  short z = (buf[5]<<8)|buf[4];
+
+  char str[32] = "-------------------------------\0";
+  char xStr[9];
+  char yStr[9];
+  char zStr[9];
+  ftos(xStr, x / 8192.0);
+  ftos(yStr, y / 8192.0);
+  ftos(zStr, z / 8192.0);
+  sprintf(str, "A%sx%sy%sz", xStr, yStr, zStr);
+
+//  int floatLen = 9;
+//  str[0] = 'A';
+//  ftos(str + 1, x, floatLen);
+//  str[1 + floatLen] = 'x';
+//  ftos(str + (2 + floatLen), y, floatLen);
+//  str[2 + 2 * floatLen] = 'y';
+//  ftos(str + (3 + 2 * floatLen), z, floatLen);
+//  str[3 + 3 * floatLen] = 'z';
+//  str[31] = '\0';
+
+  JsVar *jsStr = jsvNewFromString(str);
+  jswrap_serial_println(streamAccelSerial, jsStr);
+  jsvUnLock(jsStr);
+}
+
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "streamAccelBatch",
+    "generate" : "jswrap_banglejs_streamAccelBatch",
+    "ifdef" : "BANGLEJS"
+}
+*/
+void jswrap_banglejs_streamAccelBatch() {
+  int lineLen = 31;
+  char str[311] = "";
+  for (int i = 0; i < 10; i++) {
+    unsigned char buf[7];
+    buf[0] = 6;
+    jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
+    jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 6, buf, true);
+    float x = ((short)((buf[1] << 8) | buf[0])) / 8192.0;
+    float y = ((short)((buf[3] << 8) | buf[2])) / 8192.0;
+    float z = ((short)((buf[5] << 8) | buf[4])) / 8192.0;
+
+    char xStr[9];
+    char yStr[9];
+    char zStr[9];
+    ftos(xStr, x);
+    ftos(yStr, y);
+    ftos(zStr, z);
+    sprintf(str + i * lineLen, "A%sx%sy%sz", xStr, yStr, zStr);
+  }
+
+  str[310] = '\0';
+
+  //  int floatLen = 9;
+  //  str[0] = 'A';
+  //  ftos(str + 1, x, floatLen);
+  //  str[1 + floatLen] = 'x';
+  //  ftos(str + (2 + floatLen), y, floatLen);
+  //  str[2 + 2 * floatLen] = 'y';
+  //  ftos(str + (3 + 2 * floatLen), z, floatLen);
+  //  str[3 + 3 * floatLen] = 'z';
+  //  str[31] = '\0';
+
+  JsVar *jsStr = jsvNewFromString(str);
+  jswrap_serial_print(streamAccelSerial, jsStr);
+  jsvUnLock(jsStr);
+}
+
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
     "name" : "getHealthStatus",
     "generate" : "jswrap_banglejs_getHealthStatus",
     "return" : ["JsVar","Returns an object containing various health info"],
@@ -3345,7 +3567,7 @@ NO_INLINE void jswrap_banglejs_init() {
     healthStateClear(&healthCurrent);
     healthStateClear(&healthLast);
     healthStateClear(&healthDaily);
-  } 
+  }
   bangleFlags |= JSBF_POWER_SAVE; // ensure we turn power-save on by default every restart
   inactivityTimer = 0; // reset the LCD timeout timer
   btnLoadTimeout = DEFAULT_BTN_LOAD_TIMEOUT;
@@ -5294,7 +5516,7 @@ On Bangle.js there are a few additions over the standard `graphical_menu`:
 * The options object can contain:
   * `back : function() { }` - add a 'back' button, with the function called when
     it is pressed
-  * `remove : function() { }` - add a handler function to be called when the 
+  * `remove : function() { }` - add a handler function to be called when the
     menu is removed
   * (Bangle.js 2) `scroll : int` - an integer specifying how much the initial
     menu should be scrolled by
