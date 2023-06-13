@@ -3228,17 +3228,16 @@ void jswrap_banglejs_streamAccel() {
   buf[0] = 6;
   jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
   jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 6, buf, true);
-  short x = (buf[1]<<8)|buf[0];
-  short y = (buf[3]<<8)|buf[2];
-  short z = (buf[5]<<8)|buf[4];
-
+  float x = ((short)((buf[1] << 8) | buf[0])) / 8192.0;
+  float y = ((short)((buf[3] << 8) | buf[2])) / 8192.0;
+  float z = ((short)((buf[5] << 8) | buf[4])) / 8192.0;
   char str[32] = "-------------------------------\0";
   char xStr[9];
   char yStr[9];
   char zStr[9];
-  ftos(xStr, x / 8192.0);
-  ftos(yStr, y / 8192.0);
-  ftos(zStr, z / 8192.0);
+  ftos(xStr, x);
+  ftos(yStr, y);
+  ftos(zStr, z);
   sprintf(str, "A%sx%sy%sz", xStr, yStr, zStr);
 
 //  int floatLen = 9;
@@ -3259,43 +3258,51 @@ void jswrap_banglejs_streamAccel() {
 /*JSON{
     "type" : "staticmethod",
     "class" : "Bangle",
+    "name" : "streamAccelUncompressed",
+    "generate" : "jswrap_banglejs_streamAccelUncompressed",
+    "ifdef" : "BANGLEJS"
+}
+
+Divide values by 8192 to get the correct reading
+*/
+void jswrap_banglejs_streamAccelUncompressed() {
+  unsigned char buf[7];
+  buf[0] = 6;
+  jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
+  jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 6, buf, true);
+  short x = (buf[1] << 8) | buf[0];
+  short y = (buf[3] << 8) | buf[2];
+  short z = (buf[5] << 8) | buf[4];
+
+  char str[24] = "";
+  sprintf(str, "A%dx%dy%dz", x, y, z);
+
+  JsVar *jsStr = jsvNewFromString(str);
+  jswrap_serial_println(streamAccelSerial, jsStr);
+  jsvUnLock(jsStr);
+}
+
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
     "name" : "streamAccelBatch",
     "generate" : "jswrap_banglejs_streamAccelBatch",
     "ifdef" : "BANGLEJS"
 }
 */
 void jswrap_banglejs_streamAccelBatch() {
-  int lineLen = 31;
-  char str[311] = "";
+  int writtenChars = 0;
+  char str[231] = "";
   for (int i = 0; i < 10; i++) {
     unsigned char buf[7];
     buf[0] = 6;
     jsi2cWrite(ACCEL_I2C, ACCEL_ADDR, 1, buf, false);
     jsi2cRead(ACCEL_I2C, ACCEL_ADDR, 6, buf, true);
-    float x = ((short)((buf[1] << 8) | buf[0])) / 8192.0;
-    float y = ((short)((buf[3] << 8) | buf[2])) / 8192.0;
-    float z = ((short)((buf[5] << 8) | buf[4])) / 8192.0;
-
-    char xStr[9];
-    char yStr[9];
-    char zStr[9];
-    ftos(xStr, x);
-    ftos(yStr, y);
-    ftos(zStr, z);
-    sprintf(str + i * lineLen, "A%sx%sy%sz", xStr, yStr, zStr);
+    short x = (buf[1] << 8) | buf[0];
+    short y = (buf[3] << 8) | buf[2];
+    short z = (buf[5] << 8) | buf[4];
+    writtenChars += sprintf(str + writtenChars, "A%dx%dy%dz", x, y, z);
   }
-
-  str[310] = '\0';
-
-  //  int floatLen = 9;
-  //  str[0] = 'A';
-  //  ftos(str + 1, x, floatLen);
-  //  str[1 + floatLen] = 'x';
-  //  ftos(str + (2 + floatLen), y, floatLen);
-  //  str[2 + 2 * floatLen] = 'y';
-  //  ftos(str + (3 + 2 * floatLen), z, floatLen);
-  //  str[3 + 3 * floatLen] = 'z';
-  //  str[31] = '\0';
 
   JsVar *jsStr = jsvNewFromString(str);
   jswrap_serial_print(streamAccelSerial, jsStr);
